@@ -49,11 +49,13 @@ int read_employees(int fd, struct dbheader_t *dbhdr,
   if (employees == NULL) {
     printf("employees calloc failed\n");
     free(dbhdr);
-    return -1;
+    return STATUS_ERROR;
   }
 
   if (read(fd, employees, dbhdr->count * sizeof(struct employee_t)) < 0) {
     perror("read read_employees");
+    free(employees);
+    free(dbhdr);
     return STATUS_ERROR;
   }
 
@@ -77,8 +79,8 @@ int output_file(int fd, struct dbheader_t *dbhdr,
   int count = dbhdr->count;
 
   dbhdr->magic = htonl(dbhdr->magic);
-  dbhdr->filesize = htonl(sizeof(struct dbheader_t) +
-                          (dbhdr->count * sizeof(struct employee_t)));
+  dbhdr->filesize =
+      htonl(sizeof(struct dbheader_t) + (count * sizeof(struct employee_t)));
   dbhdr->version = htons(dbhdr->version);
   dbhdr->count = htons(dbhdr->count);
 
@@ -129,7 +131,8 @@ int validate_db_header(int fd, struct dbheader_t **headerOut) {
     printf("invalid version number\n");
     free(dbhdr);
     return STATUS_ERROR;
-  } else if (dbhdr->magic != HEADER_MAGIC) {
+  }
+  if (dbhdr->magic != HEADER_MAGIC) {
     printf("invalid header magic\n");
     free(dbhdr);
     return STATUS_ERROR;

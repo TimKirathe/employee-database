@@ -58,22 +58,20 @@ int main(int argc, char *argv[]) {
     if (dbfd == STATUS_ERROR) {
       printf("unable to create database file\n");
       return -1;
-    } else {
-      if (create_db_header(dbfd, &dbhdr) == STATUS_ERROR) {
-        printf("Failed to create database header\n");
-        return -1;
-      }
+    }
+    if (create_db_header(dbfd, &dbhdr) == STATUS_ERROR) {
+      printf("Failed to create database header\n");
+      return -1;
     }
   } else {
     dbfd = open_db_file(filepath);
     if (dbfd == STATUS_ERROR) {
       printf("unable to open database file\n");
       return -1;
-    } else {
-      if (validate_db_header(dbfd, &dbhdr) == STATUS_ERROR) {
-        printf("Failed to validate database header\n");
-        return -1;
-      }
+    }
+    if (validate_db_header(dbfd, &dbhdr) == STATUS_ERROR) {
+      printf("Failed to validate database header\n");
+      return -1;
     }
   }
   ret = read_employees(dbfd, dbhdr, &employees);
@@ -84,7 +82,8 @@ int main(int argc, char *argv[]) {
 
   if (employee_to_add) {
     dbhdr->count++;
-    if (realloc(employees, dbhdr->count * sizeof(struct employee_t)) == NULL) {
+    employees = realloc(employees, dbhdr->count * sizeof(struct employee_t));
+    if (employees == NULL) {
       printf("realloc failed: trying to make space for additional employee\n");
       return -1;
     }
