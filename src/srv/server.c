@@ -57,8 +57,47 @@ int find_fd_index(int fd) {
   return -1;
 }
 
+int send_client_errmsg(int clientfd) {
+  int ret = -1;
+  char buffer[4096];
+
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_PROTOCOL_VER_ERR);
+  dbproto_hdr->len = htons(1);
+
+  dbproto_hello_resp *hello_resp = (dbproto_hello_resp *)&dbproto_hdr[1];
+  hello_resp->proto = htons(PROTOCOL_VERSION);
+
+  ret = write(clientfd, buffer, BUFLEN);
+  if (ret == -1) {
+    perror("write -> send_client_errmsg");
+    return STATUS_ERROR;
+  }
+  return STATUS_SUCCESS;
+}
+
+int send_hello_resp_fsm(int clientfd) {
+  int ret = -1;
+  char buffer[4096];
+
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_HELLO_RESP);
+  dbproto_hdr->len = htons(1);
+
+  dbproto_hello_resp *hello_resp = (dbproto_hello_resp *)&dbproto_hdr[1];
+  hello_resp->proto = htons(PROTOCOL_VERSION);
+
+  ret = write(clientfd, buffer, BUFLEN);
+  if (ret == -1) {
+    perror("write -> send_hello_resp_fsm");
+    return STATUS_ERROR;
+  }
+  return STATUS_SUCCESS;
+}
+
 int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
                       client_state_t *client_state) {
+  int ret = -1;
   dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)client_state->buffer;
 
   dbproto_hdr->type = ntohl(dbproto_hdr->type);
@@ -69,7 +108,8 @@ int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
     if (dbproto_hdr->type != MSG_HELLO_REQ || dbproto_hdr->len != 1) {
       printf("error: client in STATE_HELLO, but either didn't receive "
              "MSG_HELLO_REQ or length of message > 1\n");
-      // TODO: Send error message to client
+      // TODO: Handle error messages in a better way
+      send_client_errmsg(client_state->fd);
     }
 
     dbproto_hello_req *hello_req = (dbproto_hello_req *)&dbproto_hdr[1];
@@ -79,15 +119,24 @@ int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
       printf("error: client protocol version %d is different from current one "
              "%d\n",
              hello_req->proto, PROTOCOL_VERSION);
-      // TODO: Send error message to client
+      // TODO: Handle error messages in a better way
+      send_client_errmsg(client_state->fd);
     }
-    // TODO: Send hello resp to client
+    ret = send_hello_resp_fsm(client_state->fd);
+    if (ret != STATUS_SUCCESS) {
+      printf("error sending hello response to client %d\n",
+             client_state->state);
+      return STATUS_ERROR;
+    }
     client_state->state = STATE_MSG;
-
+    printf("client %d state updated to %d\n", client_state->fd, STATE_MSG);
+    return STATUS_SUCCESS;
   case STATE_MSG:
     // Add Logic Here
+    return STATUS_SUCCESS;
   default:
     printf("unknown client state %d\n", client_state->state);
+    return STATUS_ERROR;
   }
 }
 
@@ -185,7 +234,7 @@ int poll_loop(struct dbheader_t *dbhdr, struct employee_t *employees) {
       available_position = find_fd_position();
       if (available_position != -1) {
         client_states[available_position].fd = clientfd;
-        client_states[available_position].state = STATE_CONNECTED;
+        client_states[available_position].state = STATE_HELLO;
         printf("client %d successfully connected\n", clientfd);
       } else {
         printf("Error: Server has no capacity to accept a new connection\n");

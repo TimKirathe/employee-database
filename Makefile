@@ -12,7 +12,7 @@ OBJ_CLI = $(patsubst src/cli/%.c, obj/cli/%.o, $(SRC_CLI))
 run: clean default
 	# ./$(TARGET_SRV) -f ./mynewdb.db -n &
 	# ./$(TARGET_CLI) 100.68.24.180
-	# kill -9 $(pidof dbserver)
+	# kill -9 $$(pidof dbserver)
 
 default: $(TARGET_SRV) $(TARGET_CLI)
 

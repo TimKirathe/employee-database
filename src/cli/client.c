@@ -1,12 +1,22 @@
 #include <arpa/inet.h>
+#include <bits/getopt_core.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "common.h"
 #include "server_header.h"
+
+void print_usage(char *argv[]) {
+  printf("Usage: %s -h <server address> -a <employee to add>", argv[0]);
+  printf("\t -h  - (required) ip address of server\n");
+  printf(
+      "\t -a  - comma separated string containing fields of employee to add\n");
+  return;
+}
 
 int send_hello(int fd) {
   int ret = -1;
@@ -24,14 +34,60 @@ int send_hello(int fd) {
     perror("write -> send_hello");
     return STATUS_ERROR;
   }
+  printf("hello_req to server succeded\n");
 
-  printf("connected successfully to server. protocol v%d\n", 1);
+  // REMINDER: Use gdb to look through what happens in buffer without memset
+  // between read and write
+  memset(buffer, '\0', BUFLEN);
+
+  ret = read(fd, buffer, BUFLEN);
+  if (ret < 0) {
+    perror("read -> send_hello");
+    return STATUS_ERROR;
+  }
+
+  dbproto_hdr->type = ntohl(dbproto_hdr->type);
+  dbproto_hdr->len = ntohs(dbproto_hdr->len);
+
+  if (dbproto_hdr->type == MSG_PROTOCOL_VER_ERR) {
+    dbproto_hello_resp *hello_resp = (dbproto_hello_resp *)&dbproto_hdr[1];
+    if (hello_resp->proto != PROTOCOL_VERSION) {
+      printf("error: protocol mismatch\n");
+    } else {
+      printf("error: unknown (at send_hello dbproto_hdr->type)\n");
+    }
+    return STATUS_ERROR;
+  }
+
+  printf("PROTO_HELLO handshake completed successfully. protocol v%d\n",
+         PROTOCOL_VERSION);
 
   return STATUS_SUCCESS;
 }
 int main(int argc, char *argv[]) {
-  if (argc != 2) {
-    printf("Usage: %s <server-ip>\n", argv[0]);
+  char *server_address = NULL;
+  char *employee_to_add = NULL;
+
+  int c;
+  while ((c = getopt(argc, argv, "h:a:")) != -1) {
+    switch (c) {
+    case 'h':
+      server_address = optarg;
+      break;
+    case 'a':
+      employee_to_add = optarg;
+      break;
+    case '?':
+      printf("unknown option %c provided\n", c);
+      break;
+    default:
+      return -1;
+    }
+  }
+
+  if (!server_address) {
+    printf("server address is a required argument\n");
+    print_usage(argv);
     return -1;
   }
 
@@ -48,7 +104,7 @@ int main(int argc, char *argv[]) {
   }
   printf("clientfd is %d\n", clientfd);
 
-  ret = inet_pton(AF_INET, argv[1], &client_inaddr);
+  ret = inet_pton(AF_INET, server_address, &client_inaddr);
   if (ret == 0) {
     printf("invalid sever address\n");
     close(clientfd);
@@ -71,7 +127,14 @@ int main(int argc, char *argv[]) {
     close(clientfd);
     return -1;
   }
-  send_hello(clientfd);
+
+  printf("connected successfully to server\n");
+
+  ret = send_hello(clientfd);
+  if (ret != STATUS_SUCCESS) {
+    close(clientfd);
+    return -1;
+  }
 
   close(clientfd);
 

@@ -14,27 +14,16 @@ typedef struct {
   unsigned short len;
 } proto_hdr_t;
 
-typedef enum {
-  STATE_NEW,
-  STATE_DISCONNECTED,
-  STATE_CONNECTED,
-  STATE_HELLO,
-  STATE_MSG,
-  STATE_GOODBYE,
-} state_e;
-
-typedef struct {
-  int fd;
-  state_e state;
-  char buffer[BUFLEN];
-} client_state_t;
-
 void init_clients();
 
 int poll_loop(struct dbheader_t *dbhdr, struct employee_t *employees);
 
 int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
                       client_state_t *client_state);
+
+int send_hello_resp_fsm(int clientfd);
+
+int send_client_errmsg(int clientfd);
 
 int find_available_position();
 
