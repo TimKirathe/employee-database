@@ -1,0 +1,41 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Iinclude",
+      "-o",
+      "obj/srv/file.o",
+      "src/srv/file.c"
+    ],
+    "directory": "/home/timmuturi/Code/employee-database",
+    "file": "/home/timmuturi/Code/employee-database/src/srv/file.c",
+    "output": "/home/timmuturi/Code/employee-database/obj/srv/file.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Iinclude",
+      "-o",
+      "obj/srv/parse.o",
+      "src/srv/parse.c"
+    ],
+    "directory": "/home/timmuturi/Code/employee-database",
+    "file": "/home/timmuturi/Code/employee-database/src/srv/parse.c",
+    "output": "/home/timmuturi/Code/employee-database/obj/srv/parse.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Iinclude",
+      "-o",
+      "obj/srv/server.o",
+      "src/srv/server.c"
+    ],
+    "directory": "/home/timmuturi/Code/employee-database",
+    "file": "/home/timmuturi/Code/employee-database/src/srv/server.c",
+    "output": "/home/timmuturi/Code/employee-database/obj/srv/server.o"
+  }
+]

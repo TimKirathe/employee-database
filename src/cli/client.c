@@ -5,32 +5,28 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "header.h"
+#include "common.h"
+#include "server_header.h"
 
-#define SERVER_PORT 5555
-
-int handle_clientfd(int fd) {
+int send_hello(int fd) {
+  int ret = -1;
   char buffer[4096] = {0};
-  proto_hdr_t *hdr = (proto_hdr_t *)buffer;
-  read(fd, hdr, sizeof(proto_hdr_t) + sizeof(int));
 
-  hdr->type = ntohl(hdr->type);
-  hdr->len = ntohs(hdr->len);
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_HELLO_REQ);
+  dbproto_hdr->len = htons(1);
 
-  int *value = (int *)&hdr[1];
-  *value = ntohl(*value);
+  dbproto_hello_req *hello_req = (dbproto_hello_req *)&dbproto_hdr[1];
+  hello_req->proto = htons(PROTOCOL_VERSION);
 
-  if (hdr->type != PROTO_HELLO) {
-    printf("Invalid protocol type. Required is %d, but was %d\n", PROTO_HELLO,
-           hdr->type);
-    return STATUS_ERROR;
-  } else if (*value != PROTOCOL_VERSION) {
-    printf("Invalid protocol length. Required is %lu, but was %d\n",
-           sizeof(*value), hdr->len);
+  ret = write(fd, buffer, BUFLEN);
+  if (ret < 0) {
+    perror("write -> send_hello");
     return STATUS_ERROR;
   }
 
-  printf("Protocol v1 successfully established! Connected to server\n");
+  printf("connected successfully to server. protocol v%d\n", 1);
+
   return STATUS_SUCCESS;
 }
 int main(int argc, char *argv[]) {
@@ -50,7 +46,7 @@ int main(int argc, char *argv[]) {
     perror("socket");
     return -1;
   }
-  printf("serverfd is %d\n", clientfd);
+  printf("clientfd is %d\n", clientfd);
 
   ret = inet_pton(AF_INET, argv[1], &client_inaddr);
   if (ret == 0) {
@@ -75,7 +71,7 @@ int main(int argc, char *argv[]) {
     close(clientfd);
     return -1;
   }
-  handle_clientfd(clientfd);
+  send_hello(clientfd);
 
   close(clientfd);
 

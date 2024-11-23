@@ -10,24 +10,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "header.h"
-
-#define SERVER_PORT 5555
-#define SERVER_ADDRESS "100.68.24.180"
-#define BUFLEN 4096
-#define MAX_CLIENTS 256
-
-typedef enum {
-  STATE_NEW,
-  STATE_DISCONNECTED,
-  STATE_CONNECTED,
-} state_e;
-
-typedef struct {
-  int fd;
-  state_e state;
-  char buffer[BUFLEN];
-} client_state_t;
 
 client_state_t client_states[MAX_CLIENTS];
 
