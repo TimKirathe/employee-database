@@ -1,13 +1,17 @@
 #include <arpa/inet.h>
 #include <bits/getopt_core.h>
 #include <netinet/in.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "client_header.h"
 #include "common.h"
+#include "parse.h"
 #include "server_header.h"
 
 void print_usage(char *argv[]) {
@@ -49,7 +53,7 @@ int send_hello(int fd) {
   dbproto_hdr->type = ntohl(dbproto_hdr->type);
   dbproto_hdr->len = ntohs(dbproto_hdr->len);
 
-  if (dbproto_hdr->type == MSG_PROTOCOL_VER_ERR) {
+  if (dbproto_hdr->type != MSG_HELLO_RESP) {
     dbproto_hello_resp *hello_resp = (dbproto_hello_resp *)&dbproto_hdr[1];
     if (hello_resp->proto != PROTOCOL_VERSION) {
       printf("error: protocol mismatch\n");
@@ -64,18 +68,117 @@ int send_hello(int fd) {
 
   return STATUS_SUCCESS;
 }
+
+int send_employee_add(int fd, char *employee, size_t employee_size) {
+  int ret = -1;
+  char buffer[BUFLEN] = {0};
+
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_EMPLOYEE_ADD_REQ);
+  dbproto_hdr->len = htons(1);
+
+  dbproto_employee_add_req *emp_add_req =
+      (dbproto_employee_add_req *)&dbproto_hdr[1];
+
+  strncpy(emp_add_req->employee, employee, employee_size);
+  printf("employee size is %lu\n", employee_size);
+
+  ret = write(fd, buffer, BUFLEN);
+  if (ret < 0) {
+    perror("write -> send_employee_add");
+    return STATUS_ERROR;
+  }
+  printf("employee_add_req to server succeded\n");
+
+  // REMINDER: Use gdb to look through what happens in buffer without memset
+  // between read and write
+  memset(buffer, '\0', BUFLEN);
+
+  ret = read(fd, buffer, BUFLEN);
+  if (ret < 0) {
+    perror("read -> send_employee_add");
+    return STATUS_ERROR;
+  }
+
+  dbproto_hdr->type = ntohl(dbproto_hdr->type);
+  dbproto_hdr->len = ntohs(dbproto_hdr->len);
+
+  if (dbproto_hdr->type != MSG_EMPLOYEE_ADD_RESP) {
+    printf("error send_employee_add: %d\n", dbproto_hdr->type);
+    return STATUS_ERROR;
+  }
+
+  printf("PROTO_EMPLOYEE_ADD handshake completed successfully. protocol v%d\n",
+         PROTOCOL_VERSION);
+
+  return STATUS_SUCCESS;
+}
+
+int send_employee_list(int fd) {
+  int ret = -1;
+  char buffer[BUFLEN] = {'\0'};
+
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_EMPLOYEE_LIST_REQ);
+  dbproto_hdr->len = htons(0);
+
+  ret = write(fd, buffer, BUFLEN);
+  if (ret < 0) {
+    perror("write -> send_employee_add");
+    return STATUS_ERROR;
+  }
+  printf("employee_list_req successfully sent to the server\n");
+
+  // REMINDER: Use gdb to look through what happens in buffer without memset
+  // between read and write
+  memset(buffer, '\0', BUFLEN);
+
+  ret = read(fd, buffer, BUFLEN);
+  if (ret < 0) {
+    perror("read -> send_employee_add");
+    return STATUS_ERROR;
+  }
+
+  dbproto_hdr->type = ntohl(dbproto_hdr->type);
+  dbproto_hdr->len = ntohs(dbproto_hdr->len);
+
+  if (dbproto_hdr->type != MSG_EMPLOYEE_LIST_RESP || dbproto_hdr->len != 2) {
+    printf("error send_employee_list: %d\n", dbproto_hdr->type);
+    return STATUS_ERROR;
+  }
+
+  dbproto_employee_list_resp *emp_list_resp =
+      (dbproto_employee_list_resp *)&dbproto_hdr[1];
+  emp_list_resp->num_employees = ntohs(emp_list_resp->num_employees);
+  struct employee_t *employees = (struct employee_t *)emp_list_resp->employees;
+  for (uint32_t i = 0; i < emp_list_resp->num_employees; i++) {
+    printf("Employee %u:\n", i);
+    printf("\tName: %s\n", employees[i].name);
+    printf("\tAddress: %s\n", employees[i].address);
+    printf("\tHours worked: %u\n", employees[i].hours);
+  }
+
+  printf("PROTO_EMPLOYEE_LIST handshake completed successfully. protocol v%d\n",
+         PROTOCOL_VERSION);
+  return STATUS_SUCCESS;
+}
+
 int main(int argc, char *argv[]) {
   char *server_address = NULL;
   char *employee_to_add = NULL;
+  bool list_employees = false;
 
   int c;
-  while ((c = getopt(argc, argv, "h:a:")) != -1) {
+  while ((c = getopt(argc, argv, "h:a:l")) != -1) {
     switch (c) {
     case 'h':
       server_address = optarg;
       break;
     case 'a':
       employee_to_add = optarg;
+      break;
+    case 'l':
+      list_employees = true;
       break;
     case '?':
       printf("unknown option %c provided\n", c);
@@ -134,6 +237,23 @@ int main(int argc, char *argv[]) {
   if (ret != STATUS_SUCCESS) {
     close(clientfd);
     return -1;
+  }
+
+  if (employee_to_add) {
+    ret = send_employee_add(clientfd, employee_to_add, strlen(employee_to_add));
+    if (ret != STATUS_SUCCESS) {
+      close(clientfd);
+      return -1;
+    }
+  }
+
+  if (list_employees) {
+    ret = send_employee_list(clientfd);
+    if (ret != STATUS_SUCCESS) {
+      close(clientfd);
+      printf("failed to list employees\n");
+      return -1;
+    }
   }
 
   close(clientfd);

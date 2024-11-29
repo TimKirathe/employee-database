@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,16 +58,13 @@ int find_fd_index(int fd) {
   return -1;
 }
 
-int send_client_errmsg(int clientfd) {
+int send_client_errmsg(int clientfd, dbproto_error_e error_type) {
   int ret = -1;
   char buffer[4096];
 
   dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
-  dbproto_hdr->type = htonl(MSG_PROTOCOL_VER_ERR);
+  dbproto_hdr->type = htonl(error_type);
   dbproto_hdr->len = htons(1);
-
-  dbproto_hello_resp *hello_resp = (dbproto_hello_resp *)&dbproto_hdr[1];
-  hello_resp->proto = htons(PROTOCOL_VERSION);
 
   ret = write(clientfd, buffer, BUFLEN);
   if (ret == -1) {
@@ -78,14 +76,14 @@ int send_client_errmsg(int clientfd) {
 
 int send_hello_resp_fsm(int clientfd) {
   int ret = -1;
-  char buffer[4096];
+  char buffer[BUFLEN];
 
   dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
   dbproto_hdr->type = htonl(MSG_HELLO_RESP);
   dbproto_hdr->len = htons(1);
 
   dbproto_hello_resp *hello_resp = (dbproto_hello_resp *)&dbproto_hdr[1];
-  hello_resp->proto = htons(PROTOCOL_VERSION);
+  hello_resp->proto = htonl(PROTOCOL_VERSION);
 
   ret = write(clientfd, buffer, BUFLEN);
   if (ret == -1) {
@@ -95,7 +93,55 @@ int send_hello_resp_fsm(int clientfd) {
   return STATUS_SUCCESS;
 }
 
-int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
+int send_employee_add_resp_fsm(int clientfd) {
+  int ret = -1;
+  char buffer[BUFLEN];
+
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_EMPLOYEE_ADD_RESP);
+  dbproto_hdr->len = htons(1);
+
+  dbproto_employee_add_resp *emp_add_resp =
+      (dbproto_employee_add_resp *)&dbproto_hdr[1];
+  emp_add_resp->status = htonl(STATUS_SUCCESS);
+
+  ret = write(clientfd, buffer, BUFLEN);
+  if (ret == -1) {
+    perror("write -> send_employee_add_resp_fsm");
+    return STATUS_ERROR;
+  }
+  return STATUS_SUCCESS;
+}
+
+int send_employee_list_resp_fsm(int clientfd, struct dbheader_t *dbhdr,
+                                struct employee_t *employees) {
+  int ret = -1;
+  size_t message_size = sizeof(dbproto_hdr_t) +
+                        sizeof(dbproto_employee_list_resp) +
+                        (dbhdr->count * sizeof(struct employee_t));
+  char *buffer = malloc(message_size);
+
+  dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)buffer;
+  dbproto_hdr->type = htonl(MSG_EMPLOYEE_LIST_RESP);
+  dbproto_hdr->len = htons(
+      2); /* I could have just specified the number of employees here instead */
+
+  dbproto_employee_list_resp *emp_list_resp =
+      (dbproto_employee_list_resp *)&dbproto_hdr[1];
+  emp_list_resp->num_employees = htons(dbhdr->count);
+  memcpy(emp_list_resp->employees, employees,
+         dbhdr->count * sizeof(struct employee_t));
+
+  ret = write(clientfd, buffer, message_size);
+  if (ret == -1) {
+    perror("write -> send_employee_list_resp_fsm");
+    return STATUS_ERROR;
+  }
+  return STATUS_SUCCESS;
+}
+
+int handle_client_fsm(int dbfd, struct dbheader_t *dbhdr,
+                      struct employee_t **employees,
                       client_state_t *client_state) {
   int ret = -1;
   dbproto_hdr_t *dbproto_hdr = (dbproto_hdr_t *)client_state->buffer;
@@ -108,10 +154,8 @@ int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
     if (dbproto_hdr->type != MSG_HELLO_REQ || dbproto_hdr->len != 1) {
       printf("error: client in STATE_HELLO, but either didn't receive "
              "MSG_HELLO_REQ or length of message > 1\n");
-      // TODO: Handle error messages in a better way
-      send_client_errmsg(client_state->fd);
+      send_client_errmsg(client_state->fd, MSG_FSM_ERR);
     }
-
     dbproto_hello_req *hello_req = (dbproto_hello_req *)&dbproto_hdr[1];
     hello_req->proto = ntohs(hello_req->proto);
 
@@ -119,8 +163,7 @@ int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
       printf("error: client protocol version %d is different from current one "
              "%d\n",
              hello_req->proto, PROTOCOL_VERSION);
-      // TODO: Handle error messages in a better way
-      send_client_errmsg(client_state->fd);
+      send_client_errmsg(client_state->fd, MSG_PROTOCOL_VER_ERR);
     }
     ret = send_hello_resp_fsm(client_state->fd);
     if (ret != STATUS_SUCCESS) {
@@ -132,15 +175,73 @@ int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
     printf("client %d state updated to %d\n", client_state->fd, STATE_MSG);
     return STATUS_SUCCESS;
   case STATE_MSG:
-    // Add Logic Here
-    return STATUS_SUCCESS;
+    switch (dbproto_hdr->type) {
+    case MSG_EMPLOYEE_ADD_REQ:
+      if (dbproto_hdr->len != 1) {
+        printf("error: invalid dbproto_hdr\n");
+        send_client_errmsg(client_state->fd, MSG_FSM_ERR);
+      }
+
+      dbproto_employee_add_req *emp_add_req =
+          (dbproto_employee_add_req *)&dbproto_hdr[1];
+
+      char employee_to_add[BUFLEN] = {'\0'};
+      strncpy(employee_to_add, emp_add_req->employee, EMPLEN);
+
+      ret = add_employee(dbhdr, employees, employee_to_add);
+      if (ret == STATUS_ERROR) {
+        printf("failed to add %s to the database\n", employee_to_add);
+        send_client_errmsg(client_state->fd, MSG_EMPLOYEE_ADD_ERR);
+        return -1;
+      }
+
+      ret = send_employee_add_resp_fsm(client_state->fd);
+      if (ret != STATUS_SUCCESS) {
+        printf("error sending hello response to client %d\n",
+               client_state->state);
+        return STATUS_ERROR;
+      }
+
+      ret = output_file(dbfd, dbhdr, *employees);
+      if (ret == STATUS_ERROR) {
+        printf("failed to save employees to database\n");
+        return -1;
+      }
+
+      printf("successfully added employee to the database\n");
+      return STATUS_SUCCESS;
+
+    case MSG_EMPLOYEE_LIST_REQ:
+      if (dbproto_hdr->len != 0) {
+        printf("error: invalid dbproto_hdr \n");
+        send_client_errmsg(client_state->fd, MSG_FSM_ERR);
+      }
+
+      ret = send_employee_list_resp_fsm(client_state->fd, dbhdr, *employees);
+      if (ret == STATUS_ERROR) {
+        printf("failed to send employee_list_resp_fsm to client %d\n",
+               client_state->fd);
+        return STATUS_ERROR;
+      }
+      return STATUS_SUCCESS;
+    default:
+      ret = send_client_errmsg(client_state->fd, MSG_UNDEFINED_PROTO_TYPE_ERR);
+      if (ret != STATUS_SUCCESS) {
+        printf("error send_client_errmsg: failed to send error response to "
+               "client.\n");
+      } else {
+        printf("error: client tried requesting undefined protocol type\n");
+      }
+      return STATUS_ERROR;
+    }
   default:
     printf("unknown client state %d\n", client_state->state);
     return STATUS_ERROR;
   }
 }
 
-int poll_loop(struct dbheader_t *dbhdr, struct employee_t *employees) {
+int poll_loop(int dbfd, struct dbheader_t *dbhdr,
+              struct employee_t *employees) {
   int serverfd = -1;
   int clientfd = -1;
   int sockopt = 1;
@@ -261,7 +362,7 @@ int poll_loop(struct dbheader_t *dbhdr, struct employee_t *employees) {
           client_states[available_position].state = STATE_DISCONNECTED;
           memset(client_states[available_position].buffer, '\0', BUFLEN);
         } else {
-          handle_client_fsm(dbhdr, employees,
+          handle_client_fsm(dbfd, dbhdr, &employees,
                             &client_states[available_position]);
           /* printf("clientfd %d, said %s\n", all_fds[i].fd, */
           /*        client_states[available_position].buffer); */
@@ -349,25 +450,33 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  if (employee_to_add) {
-    dbhdr->count++;
-    employees = realloc(employees, dbhdr->count * sizeof(struct employee_t));
-    if (employees == NULL) {
-      printf("realloc failed: trying to make space for additional employee\n");
-      return -1;
-    }
-    ret = add_employee(dbhdr, employees, employee_to_add);
-    if (ret == STATUS_ERROR) {
-      printf("failed to add %s to the %s database file\n", employee_to_add,
-             filepath);
-      return -1;
-    }
-  }
+  poll_loop(dbfd, dbhdr, employees);
+  /* if (employee_to_add) { */
+  /*   dbhdr->count++; */
+  /*   employees = realloc(employees, dbhdr->count * sizeof(struct employee_t));
+   */
+  /*   if (employees == NULL) { */
+  /*     printf("realloc failed: trying to make space for additional
+   * employee\n"); */
+  /*     return -1; */
+  /*   } */
+  /*   ret = add_employee(dbhdr, employees, employee_to_add); */
+  /*   if (ret == STATUS_ERROR) { */
+  /*     printf("failed to add %s to the %s database file\n", employee_to_add,
+   */
+  /*            filepath); */
+  /*     return -1; */
+  /*   } */
+  /* } */
 
-  poll_loop(dbhdr, employees);
-  output_file(dbfd, dbhdr, employees);
+  /* ret = output_file(dbfd, dbhdr, employees); */
+  /* if (ret == STATUS_ERROR) { */
+  /*   printf("failed to save employees to database file %s\n", filepath); */
+  /*   return -1; */
+  /* } */
 
-  free(dbhdr);
-  free(employees);
+  /* Handle freeing of dbhdr and employees correctly */
+  /* free(dbhdr); */
+  /* free(employees); */
   return EXIT_SUCCESS;
 }

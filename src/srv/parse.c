@@ -19,20 +19,35 @@ void list_employees(struct dbheader_t *dbhdr, struct employee_t *employees) {
   }
 }
 
-int add_employee(struct dbheader_t *dbhdr, struct employee_t *employees,
+int add_employee(struct dbheader_t *dbhdr, struct employee_t **employees,
                  char *addstring) {
   printf("%s\n", addstring);
   char *employee_name = strtok(addstring, ",");
+  if (employee_name == NULL)
+    return STATUS_ERROR;
   char *employee_addr = strtok(NULL, ",");
+  if (employee_addr == NULL)
+    return STATUS_ERROR;
   char *employee_hours = strtok(NULL, ",");
+  if (employee_hours == NULL)
+    return STATUS_ERROR;
 
   printf("%s %s %s\n", employee_name, employee_addr, employee_hours);
 
-  strncpy(employees[dbhdr->count - 1].name, employee_name,
-          sizeof(employees[dbhdr->count - 1].name));
-  strncpy(employees[dbhdr->count - 1].address, employee_addr,
-          sizeof(employees[dbhdr->count - 1].address));
-  employees[dbhdr->count - 1].hours = atoi(employee_hours);
+  dbhdr->count++;
+  *employees = realloc(*employees, dbhdr->count * sizeof(struct employee_t));
+  if (*employees == NULL) {
+    printf("realloc failed: trying to make space for additional employee\n");
+    return STATUS_ERROR;
+  }
+  struct employee_t *employee_ptr =
+      *employees; /* Easier to work with regular pointer than double pointer */
+
+  strncpy(employee_ptr[dbhdr->count - 1].name, employee_name,
+          sizeof(employee_ptr[dbhdr->count - 1].name));
+  strncpy(employee_ptr[dbhdr->count - 1].address, employee_addr,
+          sizeof(employee_ptr[dbhdr->count - 1].address));
+  employee_ptr[dbhdr->count - 1].hours = atoi(employee_hours);
 
   return STATUS_SUCCESS;
 }
@@ -94,12 +109,18 @@ int output_file(int fd, struct dbheader_t *dbhdr,
     return STATUS_ERROR;
   }
 
+  dbhdr->magic = ntohl(dbhdr->magic);
+  dbhdr->filesize = ntohl(dbhdr->filesize);
+  dbhdr->version = ntohs(dbhdr->version);
+  dbhdr->count = ntohs(dbhdr->count);
+
   for (int empl = 0; empl < count; empl++) {
     employees[empl].hours = htonl(employees[empl].hours);
     if (write(fd, &employees[empl], sizeof(struct employee_t)) < 0) {
       perror("write output_file - employee_t");
       return STATUS_ERROR;
     }
+    employees[empl].hours = ntohl(employees[empl].hours);
   }
   return STATUS_SUCCESS;
 }

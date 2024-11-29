@@ -16,14 +16,20 @@ typedef struct {
 
 void init_clients();
 
-int poll_loop(struct dbheader_t *dbhdr, struct employee_t *employees);
+int poll_loop(int dbfd, struct dbheader_t *dbhdr, struct employee_t *employees);
 
-int handle_client_fsm(struct dbheader_t *dbhdr, struct employee_t *employees,
+int handle_client_fsm(int dbfd, struct dbheader_t *dbhdr,
+                      struct employee_t **employees,
                       client_state_t *client_state);
 
 int send_hello_resp_fsm(int clientfd);
 
-int send_client_errmsg(int clientfd);
+int send_employee_add_resp_fsm(int clientfd);
+
+int send_employee_list_resp_fsm(int clientfd, struct dbheader_t *dbhdr,
+                                struct employee_t *employees);
+
+int send_client_errmsg(int clientfd, dbproto_error_e error_type);
 
 int find_available_position();
 
